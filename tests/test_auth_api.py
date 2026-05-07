@@ -76,3 +76,14 @@ def test_me_rejects_missing_token(client: TestClient):
     response = client.get("/api/me")
 
     assert response.status_code == 401
+    assert response.json()["detail"]["code"] == "missing_token"
+
+
+def test_me_rejects_malformed_bearer_token(client: TestClient):
+    response = client.get(
+        "/api/me",
+        headers={"Authorization": "Bearer not-a-valid-jwt"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"]["code"] == "invalid_token"

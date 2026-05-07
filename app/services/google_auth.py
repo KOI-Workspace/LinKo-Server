@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import json
+from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import urlopen
 
@@ -24,6 +25,22 @@ def verify_google_id_token(id_token: str) -> GoogleUserInfo:
     try:
         with urlopen(url, timeout=5) as response:
             payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        if exc.code in (400, 401):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={
+                    "code": "invalid_google_token",
+                    "message": "Invalid Google token",
+                },
+            ) from exc
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "code": "google_verification_failed",
+                "message": "Google token verification failed",
+            },
+        ) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
