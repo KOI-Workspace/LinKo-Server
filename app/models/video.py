@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
 from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy.ext.mutable import MutableDict
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -16,7 +17,7 @@ class Video(Base):
     thumbnail_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     duration_seconds: Mapped[int] = mapped_column(Integer)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    raw_youtube_response: Mapped[dict] = mapped_column(JSON)
+    raw_youtube_response: Mapped[dict] = mapped_column(MutableDict.as_mutable(JSON))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
