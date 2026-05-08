@@ -10,6 +10,8 @@ Start PostgreSQL:
 docker compose up -d postgres
 ```
 
+The local container publishes PostgreSQL on host port `5433` to avoid conflicts with an existing local PostgreSQL on `5432`.
+
 Install development dependencies:
 
 ```sh
