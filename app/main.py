@@ -1,8 +1,20 @@
 from fastapi import APIRouter, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth, users, videos
+from app.api import auth, users, videos, youtube
+from app.core.config import get_settings
 
 app = FastAPI(title="LinKo Server")
+settings = get_settings()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origin_list,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 api_router = APIRouter(prefix="/api")
 
 
@@ -14,4 +26,5 @@ def health_check() -> dict[str, str]:
 api_router.include_router(auth.router)
 api_router.include_router(users.router)
 api_router.include_router(videos.router)
+api_router.include_router(youtube.router)
 app.include_router(api_router)

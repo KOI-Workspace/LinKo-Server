@@ -38,6 +38,22 @@ Run the development server:
 python3 -m uvicorn app.main:app --reload
 ```
 
+## API Notes
+
+All application endpoints are prefixed with `/api`.
+
+- `POST /api/auth/google`: exchange a frontend Google ID token for a service JWT.
+- `GET /api/me`: return the authenticated user's name, email, and profile image.
+- `GET /api/videos/metadata?url=...`: return YouTube video metadata.
+- `POST /api/youtube/channels/sync`: sync Korean subscribed channels from a Google YouTube access token.
+- `GET /api/youtube/channels`: list synced channels newest first.
+
+For channel sync, the frontend should request this additional Google scope:
+
+```text
+https://www.googleapis.com/auth/youtube.readonly
+```
+
 Stop local services:
 
 ```sh

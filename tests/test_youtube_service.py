@@ -2,6 +2,7 @@ import pytest
 
 from app.services.youtube import (
     extract_video_id,
+    is_korean_channel,
     parse_iso8601_duration_seconds,
     select_thumbnail_url,
 )
@@ -45,3 +46,35 @@ def test_select_thumbnail_url_prefers_highest_known_quality():
     }
 
     assert select_thumbnail_url(thumbnails) == "standard.jpg"
+
+
+def test_is_korean_channel_accepts_korean_country():
+    item = {
+        "snippet": {"defaultLanguage": "en"},
+        "brandingSettings": {"channel": {"country": "KR"}},
+    }
+
+    assert is_korean_channel(item) is True
+
+
+@pytest.mark.parametrize("language", ["ko", "ko-KR"])
+def test_is_korean_channel_accepts_korean_default_language(language: str):
+    item = {
+        "snippet": {"defaultLanguage": language},
+        "brandingSettings": {"channel": {"country": "US"}},
+    }
+
+    assert is_korean_channel(item) is True
+
+
+def test_is_korean_channel_rejects_non_korean_channel():
+    item = {
+        "snippet": {"defaultLanguage": "en"},
+        "brandingSettings": {"channel": {"country": "US"}},
+    }
+
+    assert is_korean_channel(item) is False
+
+
+def test_is_korean_channel_rejects_missing_language_and_country():
+    assert is_korean_channel({"snippet": {}, "brandingSettings": {"channel": {}}}) is False

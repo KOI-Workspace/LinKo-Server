@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Google Login API Test</title>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      body {
+        margin: 0;
+        background: #f6f7f9;
+        color: #202124;
+      }
+
+      main {
+        max-width: 880px;
+        margin: 40px auto;
+        padding: 0 20px;
+      }
+
+      section {
+        background: #fff;
+        border: 1px solid #dde1e6;
+        border-radius: 8px;
+        padding: 20px;
+        margin-bottom: 16px;
+      }
+
+      h1 {
+        font-size: 24px;
+        margin: 0 0 16px;
+      }
+
+      h2 {
+        font-size: 16px;
+        margin: 0 0 12px;
+      }
+
+      label {
+        display: block;
+        font-size: 13px;
+        font-weight: 600;
+        margin-bottom: 6px;
+      }
+
+      input {
+        box-sizing: border-box;
+        width: 100%;
+        border: 1px solid #c9ced6;
+        border-radius: 6px;
+        padding: 10px 12px;
+        font: inherit;
+        margin-bottom: 12px;
+      }
+
+      button {
+        border: 0;
+        border-radius: 6px;
+        background: #1a73e8;
+        color: #fff;
+        cursor: pointer;
+        font: inherit;
+        font-weight: 600;
+        padding: 10px 14px;
+      }
+
+      button:disabled {
+        background: #a8b6ca;
+        cursor: not-allowed;
+      }
+
+      pre {
+        background: #111827;
+        border-radius: 8px;
+        color: #e5e7eb;
+        min-height: 120px;
+        overflow: auto;
+        padding: 14px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .row {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Google Login API Test</h1>
+
+      <section>
+        <h2>1. 설정</h2>
+        <label for="clientId">Google Client ID</label>
+        <input id="clientId" placeholder="Google OAuth Client ID" />
+        <label for="apiBase">Backend API Base</label>
+        <input id="apiBase" value="http://127.0.0.1:8000" />
+        <div class="row">
+          <button id="initButton">Google 버튼 준비</button>
+          <button id="meButton" disabled>내 프로필 조회</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>2. Google 로그인</h2>
+        <div id="googleButton"></div>
+      </section>
+
+      <section>
+        <h2>3. YouTube 메타데이터</h2>
+        <label for="youtubeUrl">YouTube URL</label>
+        <input id="youtubeUrl" value="https://www.youtube.com/watch?v=dQw4w9WgXcQ" />
+        <button id="videoButton" disabled>영상 정보 조회</button>
+      </section>
+
+      <section>
+        <h2>응답</h2>
+        <pre id="output">Google 버튼 준비를 먼저 누르세요.</pre>
+      </section>
+    </main>
+
+    <script>
+      const output = document.querySelector("#output");
+      const clientIdInput = document.querySelector("#clientId");
+      const apiBaseInput = document.querySelector("#apiBase");
+      const meButton = document.querySelector("#meButton");
+      const videoButton = document.querySelector("#videoButton");
+      let accessToken = "";
+
+      function print(value) {
+        output.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+      }
+
+      async function request(path, options = {}) {
+        const response = await fetch(`${apiBaseInput.value}${path}`, {
+          ...options,
+          headers: {
+            "Content-Type": "application/json",
+            ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+            ...(options.headers || {}),
+          },
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(JSON.stringify(body, null, 2));
+        }
+        return body;
+      }
+
+      document.querySelector("#initButton").addEventListener("click", () => {
+        const clientId = clientIdInput.value.trim();
+        if (!clientId) {
+          print("Google Client ID를 입력하세요.");
+          return;
+        }
+
+        google.accounts.id.initialize({
+          client_id: clientId,
+          callback: async (credentialResponse) => {
+            try {
+              const result = await request("/api/auth/google", {
+                method: "POST",
+                body: JSON.stringify({ id_token: credentialResponse.credential }),
+              });
+              accessToken = result.access_token;
+              meButton.disabled = false;
+              videoButton.disabled = false;
+              print(result);
+            } catch (error) {
+              print(error.message);
+            }
+          },
+        });
+
+        google.accounts.id.renderButton(document.querySelector("#googleButton"), {
+          theme: "outline",
+          size: "large",
+          width: 260,
+        });
+        print("Google 로그인 버튼이 준비됐습니다.");
+      });
+
+      meButton.addEventListener("click", async () => {
+        try {
+          print(await request("/api/me"));
+        } catch (error) {
+          print(error.message);
+        }
+      });
+
+      videoButton.addEventListener("click", async () => {
+        try {
+          const url = encodeURIComponent(document.querySelector("#youtubeUrl").value);
+          print(await request(`/api/videos/metadata?url=${url}`));
+        } catch (error) {
+          print(error.message);
+        }
+      });
+    </script>
+  </body>
+</html>

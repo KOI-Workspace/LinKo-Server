@@ -1,9 +1,6 @@
 from dataclasses import dataclass
-import json
-from urllib.error import HTTPError
-from urllib.parse import urlencode
-from urllib.request import urlopen
 
+import httpx
 from fastapi import HTTPException, status
 
 from app.core.config import get_settings
@@ -19,21 +16,26 @@ class GoogleUserInfo:
 
 def verify_google_id_token(id_token: str) -> GoogleUserInfo:
     settings = get_settings()
-    query = urlencode({"id_token": id_token})
-    url = f"https://oauth2.googleapis.com/tokeninfo?{query}"
 
     try:
-        with urlopen(url, timeout=5) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except HTTPError as exc:
-        if exc.code in (400, 401):
+        response = httpx.get(
+            "https://oauth2.googleapis.com/tokeninfo",
+            params={"id_token": id_token},
+            timeout=5,
+        )
+        if response.status_code in (400, 401):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail={
                     "code": "invalid_google_token",
                     "message": "Invalid Google token",
                 },
-            ) from exc
+            )
+        response.raise_for_status()
+        payload = response.json()
+    except HTTPException:
+        raise
+    except httpx.HTTPError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={
@@ -41,7 +43,7 @@ def verify_google_id_token(id_token: str) -> GoogleUserInfo:
                 "message": "Google token verification failed",
             },
         ) from exc
-    except Exception as exc:
+    except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={

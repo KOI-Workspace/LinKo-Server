@@ -1,6 +1,6 @@
-from urllib.error import HTTPError, URLError
 from unittest.mock import patch
 
+import httpx
 import pytest
 from fastapi import HTTPException
 
@@ -8,15 +8,9 @@ from app.services.google_auth import verify_google_id_token
 
 
 def test_verify_google_id_token_maps_invalid_token_http_error_to_unauthorized():
-    error = HTTPError(
-        url="https://oauth2.googleapis.com/tokeninfo",
-        code=400,
-        msg="Bad Request",
-        hdrs=None,
-        fp=None,
-    )
+    response = httpx.Response(400, json={"error": "invalid_token"})
 
-    with patch("app.services.google_auth.urlopen", side_effect=error):
+    with patch("app.services.google_auth.httpx.get", return_value=response):
         with pytest.raises(HTTPException) as exc_info:
             verify_google_id_token("bad-google-token")
 
@@ -26,8 +20,8 @@ def test_verify_google_id_token_maps_invalid_token_http_error_to_unauthorized():
 
 def test_verify_google_id_token_maps_network_failure_to_bad_gateway():
     with patch(
-        "app.services.google_auth.urlopen",
-        side_effect=URLError("network unavailable"),
+        "app.services.google_auth.httpx.get",
+        side_effect=httpx.ConnectError("network unavailable"),
     ):
         with pytest.raises(HTTPException) as exc_info:
             verify_google_id_token("google-token")
