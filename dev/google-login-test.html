@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Google Login API Test</title>
+    <title>Google / YouTube API Test</title>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <style>
       :root {
@@ -90,11 +90,48 @@
         gap: 10px;
         flex-wrap: wrap;
       }
+
+      .channels {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: 12px;
+        margin-top: 12px;
+      }
+
+      .channel {
+        border: 1px solid #dde1e6;
+        border-radius: 8px;
+        display: flex;
+        gap: 10px;
+        min-width: 0;
+        padding: 12px;
+      }
+
+      .channel img {
+        border-radius: 50%;
+        flex: 0 0 auto;
+        height: 44px;
+        object-fit: cover;
+        width: 44px;
+      }
+
+      .channel strong {
+        display: block;
+        font-size: 14px;
+        overflow-wrap: anywhere;
+      }
+
+      .channel span {
+        color: #5f6368;
+        display: block;
+        font-size: 12px;
+        margin-top: 4px;
+      }
     </style>
   </head>
   <body>
     <main>
-      <h1>Google Login API Test</h1>
+      <h1>Google / YouTube API Test</h1>
 
       <section>
         <h2>1. 설정</h2>
@@ -105,6 +142,7 @@
         <div class="row">
           <button id="initButton">Google 버튼 준비</button>
           <button id="meButton" disabled>내 프로필 조회</button>
+          <button id="channelListButton" disabled>저장된 채널 조회</button>
         </div>
       </section>
 
@@ -121,6 +159,14 @@
       </section>
 
       <section>
+        <h2>4. YouTube 채널 연동</h2>
+        <div class="row">
+          <button id="youtubeConnectButton" disabled>YouTube 연동 및 채널 Sync</button>
+        </div>
+        <div id="channelCards" class="channels"></div>
+      </section>
+
+      <section>
         <h2>응답</h2>
         <pre id="output">Google 버튼 준비를 먼저 누르세요.</pre>
       </section>
@@ -132,10 +178,38 @@
       const apiBaseInput = document.querySelector("#apiBase");
       const meButton = document.querySelector("#meButton");
       const videoButton = document.querySelector("#videoButton");
+      const channelListButton = document.querySelector("#channelListButton");
+      const youtubeConnectButton = document.querySelector("#youtubeConnectButton");
+      const channelCards = document.querySelector("#channelCards");
       let accessToken = "";
+      let youtubeTokenClient = null;
 
       function print(value) {
         output.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+      }
+
+      function renderChannels(channels) {
+        channelCards.replaceChildren();
+        for (const channel of channels) {
+          const card = document.createElement("article");
+          card.className = "channel";
+
+          const image = document.createElement("img");
+          image.alt = "";
+          image.src = channel.thumbnail_url || "";
+
+          const body = document.createElement("div");
+          const title = document.createElement("strong");
+          title.textContent = channel.title;
+          const meta = document.createElement("span");
+          meta.textContent = `${channel.country || "country 없음"} / ${
+            channel.default_language || "language 없음"
+          }`;
+
+          body.append(title, meta);
+          card.append(image, body);
+          channelCards.append(card);
+        }
       }
 
       async function request(path, options = {}) {
@@ -161,6 +235,11 @@
           return;
         }
 
+        if (!window.google) {
+          print("Google Identity Services 스크립트가 아직 로드되지 않았습니다. 잠시 후 다시 누르세요.");
+          return;
+        }
+
         google.accounts.id.initialize({
           client_id: clientId,
           callback: async (credentialResponse) => {
@@ -172,6 +251,8 @@
               accessToken = result.access_token;
               meButton.disabled = false;
               videoButton.disabled = false;
+              channelListButton.disabled = false;
+              youtubeConnectButton.disabled = false;
               print(result);
             } catch (error) {
               print(error.message);
@@ -184,6 +265,29 @@
           size: "large",
           width: 260,
         });
+
+        youtubeTokenClient = google.accounts.oauth2.initTokenClient({
+          client_id: clientId,
+          scope: "https://www.googleapis.com/auth/youtube.readonly",
+          callback: async (tokenResponse) => {
+            if (tokenResponse.error) {
+              print(tokenResponse);
+              return;
+            }
+
+            try {
+              const result = await request("/api/youtube/channels/sync", {
+                method: "POST",
+                body: JSON.stringify({ access_token: tokenResponse.access_token }),
+              });
+              renderChannels(result.channels);
+              print(result);
+            } catch (error) {
+              print(error.message);
+            }
+          },
+        });
+
         print("Google 로그인 버튼이 준비됐습니다.");
       });
 
@@ -202,6 +306,24 @@
         } catch (error) {
           print(error.message);
         }
+      });
+
+      channelListButton.addEventListener("click", async () => {
+        try {
+          const result = await request("/api/youtube/channels");
+          renderChannels(result.channels);
+          print(result);
+        } catch (error) {
+          print(error.message);
+        }
+      });
+
+      youtubeConnectButton.addEventListener("click", () => {
+        if (!youtubeTokenClient) {
+          print("Google 버튼 준비를 먼저 누르세요.");
+          return;
+        }
+        youtubeTokenClient.requestAccessToken({ prompt: "consent" });
       });
     </script>
   </body>
