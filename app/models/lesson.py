@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.ext.mutable import MutableDict, MutableList
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -19,6 +19,7 @@ class Lesson(Base):
     thumbnail_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     duration_seconds: Mapped[int] = mapped_column(Integer)
     generation_status: Mapped[str] = mapped_column(String(32), index=True, default="generating")
+    is_preview: Mapped[bool] = mapped_column(Boolean, index=True, default=False)
     transcript_status: Mapped[str] = mapped_column(String(32), default="pending")
     transcript_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
     transcript_text: Mapped[str | None] = mapped_column(Text, nullable=True)

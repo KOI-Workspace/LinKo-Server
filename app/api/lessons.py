@@ -163,6 +163,26 @@ def get_lesson_subtitles(
     }
 
 
+@router.patch("/{lesson_id}/preview", response_model=LessonSummary)
+def set_lesson_preview(
+    lesson_id: int,
+    is_preview: bool,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> LessonSummary:
+    """Mark or unmark a lesson as a public landing-page preview.
+
+    The lesson must belong to the requesting user (or an admin in the future).
+    When is_preview=true, the lesson becomes accessible without authentication
+    via GET /public/lessons/{id}/flashcards and /subtitles.
+    """
+    lesson = _get_user_lesson(db, lesson_id, current_user.id)
+    lesson.is_preview = is_preview
+    db.commit()
+    db.refresh(lesson)
+    return _lesson_summary(lesson)
+
+
 def generate_lesson_artifacts_task(lesson_id: int) -> None:
     db = SessionLocal()
     try:
