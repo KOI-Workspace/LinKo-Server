@@ -45,8 +45,15 @@ All application endpoints are prefixed with `/api`.
 - `POST /api/auth/google`: exchange a frontend Google ID token for a service JWT.
 - `GET /api/me`: return the authenticated user's name, email, and profile image.
 - `GET /api/videos/metadata?url=...`: return YouTube video metadata.
+- `POST /api/lessons`: create a generating lesson from a YouTube URL and start background artifact generation.
+- `GET /api/lessons`: list the authenticated user's lessons.
+- `GET /api/lessons/{lesson_id}`: return lesson generation status for polling.
+- `GET /api/lessons/{lesson_id}/flashcards`: return frontend-ready word and ending flashcards for a lesson.
+- `GET /api/lessons/{lesson_id}/subtitles`: return transcript lines, vocab hover data, and cultural notes for watch mode.
 - `POST /api/youtube/channels/sync`: sync Korean subscribed channels from a Google YouTube access token.
 - `GET /api/youtube/channels`: list synced channels newest first.
+
+Lesson generation uses `AI_PROVIDER=mock` by default for local deterministic output. Set `AI_PROVIDER=gemini` and `GEMINI_API_KEY` to call Gemini for real artifacts.
 
 For channel sync, the frontend should request this additional Google scope:
 
