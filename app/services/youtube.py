@@ -68,7 +68,7 @@ def fetch_youtube_video_item(video_id: str) -> dict:
         response = httpx.get(
             "https://www.googleapis.com/youtube/v3/videos",
             params={
-                "part": "snippet,contentDetails",
+                "part": "snippet,contentDetails,status",
                 "id": video_id,
                 "key": settings.youtube_api_key,
             },
@@ -92,6 +92,46 @@ def fetch_youtube_video_item(video_id: str) -> dict:
             detail={"code": "youtube_video_not_found", "message": "YouTube video not found"},
         )
     return items[0]
+
+
+def validate_video_item(item: dict):
+    """
+    영상 메타데이터를 기반으로 LinKo 지원 여부를 검증합니다.
+    """
+    content_details = item.get("contentDetails", {})
+    status_info = item.get("status", {})
+
+    # 1. 360도 영상 체크
+    if content_details.get("projection") == "360":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "360_video_not_supported",
+                "message": "360 degree videos are not supported yet.",
+            },
+        )
+
+    # 2. 영상 길이 체크 (2시간 = 7200초)
+    duration_str = content_details.get("duration", "PT0S")
+    duration_secs = parse_iso8601_duration_seconds(duration_str)
+    if duration_secs > 7200:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "video_too_long",
+                "message": "Videos longer than 2 hours are not supported.",
+            },
+        )
+
+    # 3. 외부 재생 차단 체크
+    if not status_info.get("embeddable", True):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "embedding_blocked",
+                "message": "This video blocks external playback.",
+            },
+        )
 
 
 def fetch_user_subscription_channel_ids(access_token: str) -> list[str]:
