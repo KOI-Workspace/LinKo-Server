@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     google_client_id: str = "dev-google-client-id"
     google_client_secret: str = ""
     youtube_api_key: str = "dev-youtube-api-key"
+    ai_provider: str = "mock"
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.5-flash"
     cors_origins: str = (
         "http://localhost:3000,"
         "http://127.0.0.1:3000,"
