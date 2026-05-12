@@ -189,7 +189,7 @@ def _call_gemini(
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
             "generationConfig": {"responseMimeType": "application/json"},
         },
-        timeout=300,
+        timeout=600,
     )
     response.raise_for_status()
     data = response.json()
