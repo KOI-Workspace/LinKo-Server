@@ -88,7 +88,7 @@ def test_build_subtitle_artifacts_merges_overlapping_english_segments():
     assert subtitles["lines"][1]["english"] == ""
 
 
-def test_flashcard_transcript_is_limited_to_five_minutes_and_safe_character_count():
+def test_flashcard_transcript_is_limited_to_safe_duration_and_character_count():
     transcript = TranscriptResult(
         source="youtube_caption",
         text="",
@@ -101,9 +101,9 @@ def test_flashcard_transcript_is_limited_to_five_minutes_and_safe_character_coun
 
     limited = limit_transcript_for_flashcards(transcript)
 
-    assert limited.segments[-1].end_sec <= 300
+    assert limited.segments[-1].end_sec <= 180
     assert len(limited.text) <= FLASHCARD_TRANSCRIPT_MAX_CHARS + len(limited.segments)
-    assert all(segment.start_sec < 300 for segment in limited.segments)
+    assert all(segment.start_sec < 180 for segment in limited.segments)
 
 
 def test_flashcard_transcript_sampling_is_deterministic_and_not_always_the_start():
@@ -122,7 +122,7 @@ def test_flashcard_transcript_sampling_is_deterministic_and_not_always_the_start
     assert first.segments == second.segments
     assert first.segments[0].start_sec > 0
     covered_seconds = sum(segment.end_sec - segment.start_sec for segment in first.segments)
-    assert covered_seconds <= 300
+    assert covered_seconds <= 180
 
 
 def test_validate_lesson_artifacts_rejects_missing_required_shapes():

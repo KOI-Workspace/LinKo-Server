@@ -7,8 +7,8 @@ from app.core.config import get_settings
 from app.services.transcripts import TranscriptResult, TranscriptSegment
 
 
-FLASHCARD_TRANSCRIPT_MAX_SECONDS = 300
-FLASHCARD_TRANSCRIPT_MAX_CHARS = 12000
+FLASHCARD_TRANSCRIPT_MAX_SECONDS = 180
+FLASHCARD_TRANSCRIPT_MAX_CHARS = 6000
 
 
 class ArtifactValidationError(ValueError):
@@ -167,7 +167,7 @@ def sample_transcript_for_flashcards(
         return limit_transcript_for_flashcards(transcript, max_seconds=max_seconds, max_chars=max_chars)
 
     rng = random.Random(seed)
-    window_count = 3 if total_end - total_start > 900 else 2
+    window_count = 2
     window_seconds = max_seconds / window_count
     bucket_seconds = (total_end - total_start) / window_count
     starts = []
@@ -462,18 +462,18 @@ Required top-level shape:
 Rules:
 - You are receiving a deterministic sample of continuous transcript excerpts, capped to roughly {FLASHCARD_TRANSCRIPT_MAX_SECONDS // 60} total minutes and {FLASHCARD_TRANSCRIPT_MAX_CHARS} characters to keep the request small and reliable.
 - Create flashcards and watch enrichments only from these sampled excerpts. Do not try to cover the whole video.
-- flashcards.cards must contain 5 to 10 cards when the excerpt has enough material.
-- Include BOTH word cards and useful ending cards.
+- flashcards.cards must contain 3 to 5 cards when the excerpt has enough material.
+- Prefer word cards. Include at most 1 ending card only if a useful grammar pattern is obvious.
 - Use ONLY the timestamped transcript segments below for all startSec/endSec values.
 - For every flashcard video, startSec/endSec MUST match the transcript segment that contains the exampleSentence or scriptSentence. Do not invent timestamps.
 - watch.vocabMap powers hidden vocabulary labels in the Watch UI. Keys MUST be Korean surface forms that appear verbatim in the sampled transcript.
-- When a watch.vocabMap entry corresponds to a flashcard, set cardId to that flashcard id.
+- watch.vocabMap must contain at most 5 entries. When an entry corresponds to a flashcard, set cardId to that flashcard id.
 - watch.vocabMap values MUST include meaning, lessonId, expression, exampleSentence, and exampleTranslation.
-- watch.culturalNotes should contain 2 to 5 notes for slang, idioms, cultural context, or grammar patterns found in the sampled excerpts.
+- watch.culturalNotes should contain 0 to 2 notes for slang, idioms, cultural context, or grammar patterns found in the sampled excerpts.
 - watch.culturalNotes subtitleId MUST reference one of the sampled subtitle ids shown below, such as s1, s2, s3.
-- YOU MUST format EACH card EXACTLY according to these structures:
+- Use these compact card shapes:
 
-Structure for Word card (type="word"):
+Word card:
 {{
   "id": "fc-{lesson_id}-word-1",
   "type": "word",
@@ -489,7 +489,7 @@ Structure for Word card (type="word"):
   ]
 }}
 
-Structure for Ending card (type="ending"):
+Ending card:
 {{
   "id": "fc-{lesson_id}-ending-1",
   "type": "ending",
