@@ -1,8 +1,12 @@
 import pytest
 
+from app.core.config import get_settings
 from app.services.lesson_artifacts import (
     ArtifactValidationError,
+    FLASHCARD_TRANSCRIPT_MAX_CHARS,
+    build_subtitle_artifacts,
     generate_lesson_artifacts_from_transcript,
+    limit_transcript_for_flashcards,
     _parse_gemini_json,
     validate_lesson_artifacts,
 )
@@ -33,6 +37,7 @@ def sample_transcript() -> TranscriptResult:
 
 def test_generate_lesson_artifacts_returns_frontend_contract(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("AI_PROVIDER", "mock")
+    get_settings.cache_clear()
 
     artifacts = generate_lesson_artifacts_from_transcript(
         lesson_id="42",
@@ -52,8 +57,50 @@ def test_generate_lesson_artifacts_returns_frontend_contract(monkeypatch: pytest
     }
     assert artifacts.subtitles["youtubeId"] == "abc123XYZ00"
     assert artifacts.subtitles["lines"][0]["korean"].startswith("안녕하세요")
-    assert "안녕하세요" in artifacts.watch_vocab
-    assert artifacts.cultural_notes[0]["subtitleId"] == "s1"
+    assert artifacts.subtitles["lines"][0]["english"] == ""
+    assert artifacts.watch_vocab == {}
+    assert artifacts.cultural_notes == []
+    get_settings.cache_clear()
+
+
+def test_build_subtitle_artifacts_merges_overlapping_english_segments():
+    english_transcript = TranscriptResult(
+        source="youtube_caption",
+        text="Hello. Today we study Korean.",
+        lang="en",
+        segments=[
+            TranscriptSegment(start_sec=0, end_sec=2, text="Hello."),
+            TranscriptSegment(start_sec=2, end_sec=5, text="Today we study Korean."),
+        ],
+    )
+
+    subtitles = build_subtitle_artifacts(
+        youtube_id="abc123XYZ00",
+        duration_seconds=10,
+        transcript=sample_transcript(),
+        english_transcript=english_transcript,
+    )
+
+    assert subtitles["lines"][0]["english"] == "Hello. Today we study Korean."
+    assert subtitles["lines"][1]["english"] == ""
+
+
+def test_flashcard_transcript_is_limited_to_five_minutes_and_safe_character_count():
+    transcript = TranscriptResult(
+        source="youtube_caption",
+        text="",
+        segments=[
+            TranscriptSegment(start_sec=0, end_sec=120, text="가" * 6000),
+            TranscriptSegment(start_sec=120, end_sec=240, text="나" * 6000),
+            TranscriptSegment(start_sec=240, end_sec=360, text="다" * 6000),
+        ],
+    )
+
+    limited = limit_transcript_for_flashcards(transcript)
+
+    assert limited.segments[-1].end_sec <= 300
+    assert len(limited.text) <= FLASHCARD_TRANSCRIPT_MAX_CHARS + len(limited.segments)
+    assert all(segment.start_sec < 300 for segment in limited.segments)
 
 
 def test_validate_lesson_artifacts_rejects_missing_required_shapes():

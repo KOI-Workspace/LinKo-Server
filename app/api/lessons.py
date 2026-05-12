@@ -16,7 +16,10 @@ from app.schemas.lesson import (
     LessonStatusResponse,
     LessonSummary,
 )
-from app.services.lesson_artifacts import generate_lesson_artifacts_from_transcript
+from app.services.lesson_artifacts import (
+    build_subtitle_artifacts,
+    generate_lesson_artifacts_from_transcript,
+)
 from app.services.transcripts import download_youtube_captions
 from app.services.youtube import (
     extract_video_id,
@@ -39,8 +42,8 @@ def _lesson_summary(lesson: Lesson) -> LessonSummary:
         duration=format_duration(lesson.duration_seconds),
         date=lesson.created_at.strftime("%Y.%m.%d") if lesson.created_at else None,
         generationStatus=lesson.generation_status,
-        flashcardDone=False,
-        subtitleDone=False,
+        flashcardDone=lesson.flashcards_json is not None,
+        subtitleDone=lesson.subtitles_json is not None,
         errorCode=lesson.error_code,
         errorMessage=lesson.error_message,
     )
@@ -190,14 +193,21 @@ def generate_lesson_artifacts_task(lesson_id: int) -> None:
         if lesson is None:
             return
 
-        end_sec = min(lesson.duration_seconds, 600)
         with TemporaryDirectory() as tmp_dir:
             transcript = download_youtube_captions(
                 lesson.youtube_url,
                 Path(tmp_dir),
                 lang="ko",
                 start_sec=0,
-                end_sec=end_sec,
+                end_sec=lesson.duration_seconds,
+                allow_auto=True,
+            )
+            english_transcript = download_youtube_captions(
+                lesson.youtube_url,
+                Path(tmp_dir),
+                lang="en",
+                start_sec=0,
+                end_sec=lesson.duration_seconds,
                 allow_auto=True,
             )
 
@@ -211,13 +221,6 @@ def generate_lesson_artifacts_task(lesson_id: int) -> None:
             db.commit()
             return
 
-        artifacts = generate_lesson_artifacts_from_transcript(
-            lesson_id=str(lesson.id),
-            lesson_title=lesson.title,
-            youtube_id=lesson.youtube_video_id,
-            duration_seconds=lesson.duration_seconds,
-            transcript=transcript,
-        )
         lesson.transcript_status = "ready"
         lesson.transcript_source = transcript.source
         lesson.transcript_text = transcript.text
@@ -229,13 +232,36 @@ def generate_lesson_artifacts_task(lesson_id: int) -> None:
             }
             for segment in transcript.segments
         ]
-        lesson.flashcards_json = artifacts.flashcards
-        lesson.subtitles_json = artifacts.subtitles
-        lesson.watch_vocab_json = artifacts.watch_vocab
-        lesson.cultural_notes_json = artifacts.cultural_notes
+        lesson.subtitles_json = build_subtitle_artifacts(
+            youtube_id=lesson.youtube_video_id,
+            duration_seconds=lesson.duration_seconds,
+            transcript=transcript,
+            english_transcript=english_transcript,
+        )
+        lesson.watch_vocab_json = {}
+        lesson.cultural_notes_json = []
+        db.commit()
+
+        try:
+            artifacts = generate_lesson_artifacts_from_transcript(
+                lesson_id=str(lesson.id),
+                lesson_title=lesson.title,
+                youtube_id=lesson.youtube_video_id,
+                duration_seconds=lesson.duration_seconds,
+                transcript=transcript,
+                english_transcript=english_transcript,
+            )
+            lesson.flashcards_json = artifacts.flashcards
+            lesson.watch_vocab_json = artifacts.watch_vocab
+            lesson.cultural_notes_json = artifacts.cultural_notes
+            lesson.error_code = None
+            lesson.error_message = None
+        except Exception as exc:
+            lesson.flashcards_json = None
+            lesson.error_code = "flashcard_generation_failed"
+            lesson.error_message = str(exc)
+
         lesson.generation_status = "ready"
-        lesson.error_code = None
-        lesson.error_message = None
         db.commit()
     except Exception as exc:
         db.rollback()

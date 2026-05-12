@@ -21,6 +21,7 @@ class TranscriptResult:
     source: Literal["youtube_caption", "youtube_auto_caption"]
     text: str
     segments: list[TranscriptSegment]
+    lang: str | None = None
 
 
 def filter_segments(
@@ -43,6 +44,7 @@ def download_youtube_captions(
     end_sec: int,
     allow_auto: bool = True,
     runner: any = None,  # Signature compatibility
+    require_requested_lang: bool = True,
 ) -> TranscriptResult | None:
     settings = get_settings()
     if not settings.supadata_api_key:
@@ -64,6 +66,10 @@ def download_youtube_captions(
             return None
         
         data = response.json()
+        actual_lang = data.get("lang")
+        if require_requested_lang and actual_lang != lang:
+            return None
+
         content = data.get("content", [])
         
         segments: list[TranscriptSegment] = []
@@ -95,7 +101,8 @@ def download_youtube_captions(
         return TranscriptResult(
             source="youtube_caption",
             text=full_text,
-            segments=segments
+            segments=segments,
+            lang=actual_lang,
         )
 
     except Exception:

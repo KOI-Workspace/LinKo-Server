@@ -50,3 +50,38 @@ def test_download_youtube_captions_success(mock_get_settings, mock_get, tmp_path
     assert len(transcript.segments) == 2
     assert transcript.segments[0].start_sec == 0.0
     assert transcript.segments[1].end_sec == 10.0
+    assert transcript.lang == "ko"
+
+
+@patch("app.services.transcripts.httpx.get")
+@patch("app.services.transcripts.get_settings")
+def test_download_youtube_captions_rejects_supadata_language_fallback(
+    mock_get_settings,
+    mock_get,
+    tmp_path: Path,
+):
+    mock_settings = MagicMock()
+    mock_settings.supadata_api_key = "test-key"
+    mock_get_settings.return_value = mock_settings
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "content": [
+            {"text": "안녕하세요.", "offset": 0, "duration": 5000, "lang": "ko"},
+        ],
+        "lang": "ko",
+        "availableLangs": ["ko"],
+    }
+    mock_get.return_value = mock_response
+
+    transcript = download_youtube_captions(
+        "https://youtu.be/abc123XYZ00",
+        tmp_path,
+        lang="en",
+        start_sec=0,
+        end_sec=10,
+        allow_auto=True,
+    )
+
+    assert transcript is None
