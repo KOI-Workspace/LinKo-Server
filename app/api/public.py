@@ -147,6 +147,7 @@ def get_preview_subtitles(
         )
     return {
         **lesson.subtitles_json,
+        "youtubeId": lesson.subtitles_json.get("youtubeId") or lesson.youtube_video_id,
         "vocabMap": lesson.watch_vocab_json or {},
         "culturalNotes": lesson.cultural_notes_json or [],
     }

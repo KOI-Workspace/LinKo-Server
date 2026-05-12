@@ -278,6 +278,15 @@ def test_get_preview_subtitles_schema():
     assert isinstance(data["culturalNotes"], list)
 
 
+def test_get_preview_subtitles_falls_back_to_lesson_youtube_id():
+    with TestingSessionLocal() as db:
+        lesson = _make_lesson(db, subtitles_json={"durationSec": 60, "lines": []})
+
+    data = client.get(f"{BASE}/lessons/{lesson.id}/subtitles").json()
+
+    assert data["youtubeId"] == lesson.youtube_video_id
+
+
 def test_get_preview_subtitles_lines_shape():
     with TestingSessionLocal() as db:
         lesson = _make_lesson(db)

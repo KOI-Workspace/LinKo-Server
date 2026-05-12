@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Any
 import json
+import random
 
 from app.core.config import get_settings
 from app.services.transcripts import TranscriptResult, TranscriptSegment
@@ -36,7 +37,10 @@ def generate_lesson_artifacts_from_transcript(
         transcript=transcript,
         english_transcript=english_transcript,
     )
-    flashcard_transcript = limit_transcript_for_flashcards(transcript)
+    flashcard_transcript = sample_transcript_for_flashcards(
+        transcript=transcript,
+        seed=f"{lesson_id}:{youtube_id}",
+    )
     settings = get_settings()
     if settings.ai_provider == "gemini" and settings.gemini_api_key:
         payload = _call_gemini(
@@ -56,12 +60,19 @@ def generate_lesson_artifacts_from_transcript(
         )
 
     flashcards = validate_flashcard_artifacts(payload)
+    watch_enrichments = validate_watch_enrichments(payload)
     return LessonArtifacts(
         flashcards=flashcards,
         subtitles=subtitles,
-        watch_vocab={},
-        cultural_notes=[],
+        watch_vocab=watch_enrichments.watch_vocab,
+        cultural_notes=watch_enrichments.cultural_notes,
     )
+
+
+@dataclass(frozen=True)
+class WatchEnrichments:
+    watch_vocab: dict[str, Any]
+    cultural_notes: list[dict[str, Any]]
 
 
 def build_subtitle_artifacts(
@@ -141,6 +152,73 @@ def limit_transcript_for_flashcards(
     )
 
 
+def sample_transcript_for_flashcards(
+    transcript: TranscriptResult,
+    seed: str,
+    max_seconds: int = FLASHCARD_TRANSCRIPT_MAX_SECONDS,
+    max_chars: int = FLASHCARD_TRANSCRIPT_MAX_CHARS,
+) -> TranscriptResult:
+    if not transcript.segments:
+        return TranscriptResult(source=transcript.source, text="", segments=[], lang=transcript.lang)
+
+    total_start = transcript.segments[0].start_sec
+    total_end = max(segment.end_sec for segment in transcript.segments)
+    if total_end - total_start <= max_seconds:
+        return limit_transcript_for_flashcards(transcript, max_seconds=max_seconds, max_chars=max_chars)
+
+    rng = random.Random(seed)
+    window_count = 3 if total_end - total_start > 900 else 2
+    window_seconds = max_seconds / window_count
+    bucket_seconds = (total_end - total_start) / window_count
+    starts = []
+    for index in range(window_count):
+        bucket_start = total_start + (index * bucket_seconds)
+        bucket_end = total_start + ((index + 1) * bucket_seconds)
+        latest_start = max(bucket_start, bucket_end - window_seconds)
+        starts.append(rng.uniform(bucket_start, latest_start))
+
+    selected: list[TranscriptSegment] = []
+    used_chars = 0
+    selected_keys: set[tuple[float, float, str]] = set()
+
+    for start in starts:
+        end = min(start + window_seconds, total_end)
+        for segment in transcript.segments:
+            if segment.end_sec <= start or segment.start_sec >= end:
+                continue
+            remaining_chars = max_chars - used_chars
+            if remaining_chars <= 0:
+                break
+
+            text = segment.text[:remaining_chars].rstrip()
+            if not text:
+                break
+
+            clipped = TranscriptSegment(
+                start_sec=max(segment.start_sec, start),
+                end_sec=min(segment.end_sec, end),
+                text=text,
+            )
+            key = (clipped.start_sec, clipped.end_sec, clipped.text)
+            if key in selected_keys:
+                continue
+
+            selected.append(clipped)
+            selected_keys.add(key)
+            used_chars += len(text)
+
+        if used_chars >= max_chars:
+            break
+
+    selected.sort(key=lambda segment: (segment.start_sec, segment.end_sec))
+    return TranscriptResult(
+        source=transcript.source,
+        text="\n".join(segment.text for segment in selected),
+        segments=selected,
+        lang=transcript.lang,
+    )
+
+
 def validate_lesson_artifacts(payload: dict[str, Any]) -> LessonArtifacts:
     subtitles = payload.get("subtitles")
     if not isinstance(subtitles, dict):
@@ -167,6 +245,27 @@ def validate_flashcard_artifacts(payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(flashcards.get("cards"), list):
         raise ArtifactValidationError("flashcards.cards must be a list")
     return flashcards
+
+
+def validate_watch_enrichments(payload: dict[str, Any]) -> WatchEnrichments:
+    watch = payload.get("watch", {})
+    if watch is None:
+        watch = {}
+    if not isinstance(watch, dict):
+        raise ArtifactValidationError("watch must be an object")
+
+    watch_vocab = watch.get("vocabMap", {})
+    if not isinstance(watch_vocab, dict):
+        raise ArtifactValidationError("watch.vocabMap must be an object")
+
+    cultural_notes = watch.get("culturalNotes", [])
+    if not isinstance(cultural_notes, list):
+        raise ArtifactValidationError("watch.culturalNotes must be a list")
+
+    return WatchEnrichments(
+        watch_vocab=watch_vocab,
+        cultural_notes=cultural_notes,
+    )
 
 
 def _validate_watch_vocab(subtitles: dict[str, Any]) -> dict[str, Any]:
@@ -219,6 +318,27 @@ def _mock_flashcards(
                         {"text": f"{expression} 무슨 뜻이에요?", "isQuestion": True},
                         {"text": f"{expression} means the key expression here.", "isQuestion": False},
                     ],
+                }
+            ],
+        },
+        "watch": {
+            "vocabMap": {
+                expression: {
+                    "meaning": f"Meaning of {expression}",
+                    "cardId": card_id,
+                    "lessonId": lesson_id,
+                    "expression": expression,
+                    "exampleSentence": first_text,
+                    "exampleTranslation": f"English translation for: {first_text}",
+                }
+            },
+            "culturalNotes": [
+                {
+                    "id": f"culture-{lesson_id}-1",
+                    "subtitleId": "s1",
+                    "title": expression,
+                    "keyword": "Context",
+                    "explanation": "This note is generated from the transcript context.",
                 }
             ],
         },
@@ -325,8 +445,8 @@ def _build_gemini_prompt(
     transcript: TranscriptResult,
 ) -> str:
     timestamped_segments = "\n".join(
-        f"[{int(segment.start_sec)}-{int(segment.end_sec)}] {segment.text}"
-        for segment in transcript.segments
+        f"[s{index} {int(segment.start_sec)}-{int(segment.end_sec)}] {segment.text}"
+        for index, segment in enumerate(transcript.segments, start=1)
     )
 
     return f"""
@@ -335,16 +455,22 @@ Return only valid JSON, no markdown.
 
 Required top-level shape:
 {{
-  "flashcards": {{"lessonId": "{lesson_id}", "lessonTitle": "{lesson_title}", "cards": []}}
+  "flashcards": {{"lessonId": "{lesson_id}", "lessonTitle": "{lesson_title}", "cards": []}},
+  "watch": {{"vocabMap": {{}}, "culturalNotes": []}}
 }}
 
 Rules:
-- You are receiving a deliberately shortened transcript excerpt, capped to roughly the first {FLASHCARD_TRANSCRIPT_MAX_SECONDS // 60} minutes and {FLASHCARD_TRANSCRIPT_MAX_CHARS} characters to keep the request small and reliable.
-- Create flashcards only from this excerpt. Do not try to cover the whole video.
+- You are receiving a deterministic sample of continuous transcript excerpts, capped to roughly {FLASHCARD_TRANSCRIPT_MAX_SECONDS // 60} total minutes and {FLASHCARD_TRANSCRIPT_MAX_CHARS} characters to keep the request small and reliable.
+- Create flashcards and watch enrichments only from these sampled excerpts. Do not try to cover the whole video.
 - flashcards.cards must contain 5 to 10 cards when the excerpt has enough material.
 - Include BOTH word cards and useful ending cards.
 - Use ONLY the timestamped transcript segments below for all startSec/endSec values.
 - For every flashcard video, startSec/endSec MUST match the transcript segment that contains the exampleSentence or scriptSentence. Do not invent timestamps.
+- watch.vocabMap powers hidden vocabulary labels in the Watch UI. Keys MUST be Korean surface forms that appear verbatim in the sampled transcript.
+- When a watch.vocabMap entry corresponds to a flashcard, set cardId to that flashcard id.
+- watch.vocabMap values MUST include meaning, lessonId, expression, exampleSentence, and exampleTranslation.
+- watch.culturalNotes should contain 2 to 5 notes for slang, idioms, cultural context, or grammar patterns found in the sampled excerpts.
+- watch.culturalNotes subtitleId MUST reference one of the sampled subtitle ids shown below, such as s1, s2, s3.
 - YOU MUST format EACH card EXACTLY according to these structures:
 
 Structure for Word card (type="word"):

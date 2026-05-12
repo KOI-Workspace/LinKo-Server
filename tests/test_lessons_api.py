@@ -140,6 +140,44 @@ def test_ready_lesson_flashcards_and_subtitles_are_returned(client: TestClient):
     assert response.json()["youtubeId"] == "ready123"
 
 
+def test_lesson_subtitles_fall_back_to_lesson_youtube_id_when_artifact_omits_it(
+    client: TestClient,
+):
+    headers = auth_headers(client)
+    db = next(app.dependency_overrides[get_db]())
+    try:
+        user_id = db.scalar(select(User.id).where(User.email == "lessons@example.com"))
+        lesson = Lesson(
+            user_id=user_id,
+            youtube_url="https://youtu.be/fallback123",
+            youtube_video_id="fallback123",
+            title="Fallback Video Lesson",
+            channel_title="Channel",
+            thumbnail_url=None,
+            duration_seconds=60,
+            generation_status="ready",
+            transcript_status="ready",
+            transcript_source="youtube_caption",
+            transcript_text="안녕하세요.",
+            flashcards_json={"lessonId": "1", "lessonTitle": "Fallback Video Lesson", "cards": []},
+            subtitles_json={"durationSec": 60, "lines": []},
+            watch_vocab_json={},
+            cultural_notes_json=[],
+            raw_youtube_metadata={},
+        )
+        db.add(lesson)
+        db.commit()
+        db.refresh(lesson)
+        lesson_id = lesson.id
+    finally:
+        db.close()
+
+    response = client.get(f"/api/lessons/{lesson_id}/subtitles", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()["youtubeId"] == "fallback123"
+
+
 def test_lesson_artifact_endpoints_return_status_specific_errors(client: TestClient):
     headers = auth_headers(client)
     db = next(app.dependency_overrides[get_db]())
@@ -254,6 +292,8 @@ def test_background_task_generates_and_stores_artifacts(client: TestClient, monk
     assert response.status_code == 200
     assert response.json()["youtubeId"] == "abc123XYZ00"
     assert response.json()["lines"][0]["english"] == "Hello. Today we study Korean."
+    assert "안녕하세요" in response.json()["vocabMap"]
+    assert response.json()["culturalNotes"][0]["subtitleId"] == "s1"
     get_settings.cache_clear()
 
 

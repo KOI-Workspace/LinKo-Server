@@ -28,6 +28,7 @@ from app.services.youtube import (
     parse_iso8601_duration_seconds,
     parse_published_at,
     select_thumbnail_url,
+    validate_video_item,
 )
 
 router = APIRouter(prefix="/lessons", tags=["lessons"])
@@ -75,6 +76,7 @@ def create_lesson(
         ) from exc
 
     item = fetch_youtube_video_item(youtube_video_id)
+    validate_video_item(item)
     snippet = item["snippet"]
     duration_seconds = parse_iso8601_duration_seconds(item["contentDetails"]["duration"])
     lesson = Lesson(
@@ -161,6 +163,7 @@ def get_lesson_subtitles(
         )
     return {
         **lesson.subtitles_json,
+        "youtubeId": lesson.subtitles_json.get("youtubeId") or lesson.youtube_video_id,
         "vocabMap": lesson.watch_vocab_json or {},
         "culturalNotes": lesson.cultural_notes_json or [],
     }

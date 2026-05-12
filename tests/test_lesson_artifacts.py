@@ -7,8 +7,10 @@ from app.services.lesson_artifacts import (
     build_subtitle_artifacts,
     generate_lesson_artifacts_from_transcript,
     limit_transcript_for_flashcards,
+    sample_transcript_for_flashcards,
     _parse_gemini_json,
     validate_lesson_artifacts,
+    validate_watch_enrichments,
 )
 from app.services.transcripts import TranscriptResult, TranscriptSegment
 
@@ -58,8 +60,9 @@ def test_generate_lesson_artifacts_returns_frontend_contract(monkeypatch: pytest
     assert artifacts.subtitles["youtubeId"] == "abc123XYZ00"
     assert artifacts.subtitles["lines"][0]["korean"].startswith("안녕하세요")
     assert artifacts.subtitles["lines"][0]["english"] == ""
-    assert artifacts.watch_vocab == {}
-    assert artifacts.cultural_notes == []
+    assert "안녕하세요" in artifacts.watch_vocab
+    assert artifacts.watch_vocab["안녕하세요"]["cardId"] == "fc-42-1"
+    assert artifacts.cultural_notes[0]["subtitleId"] == "s1"
     get_settings.cache_clear()
 
 
@@ -103,6 +106,25 @@ def test_flashcard_transcript_is_limited_to_five_minutes_and_safe_character_coun
     assert all(segment.start_sec < 300 for segment in limited.segments)
 
 
+def test_flashcard_transcript_sampling_is_deterministic_and_not_always_the_start():
+    transcript = TranscriptResult(
+        source="youtube_caption",
+        text="",
+        segments=[
+            TranscriptSegment(start_sec=i * 30, end_sec=(i + 1) * 30, text=f"구간{i}")
+            for i in range(40)
+        ],
+    )
+
+    first = sample_transcript_for_flashcards(transcript, seed="lesson:abc")
+    second = sample_transcript_for_flashcards(transcript, seed="lesson:abc")
+
+    assert first.segments == second.segments
+    assert first.segments[0].start_sec > 0
+    covered_seconds = sum(segment.end_sec - segment.start_sec for segment in first.segments)
+    assert covered_seconds <= 300
+
+
 def test_validate_lesson_artifacts_rejects_missing_required_shapes():
     with pytest.raises(ArtifactValidationError, match="flashcards.cards"):
         validate_lesson_artifacts(
@@ -119,6 +141,14 @@ def test_validate_lesson_artifacts_rejects_missing_required_shapes():
                 "subtitles": {"youtubeId": "abc", "durationSec": 1},
             }
         )
+
+
+def test_validate_watch_enrichments_rejects_bad_shapes():
+    with pytest.raises(ArtifactValidationError, match="watch.vocabMap"):
+        validate_watch_enrichments({"watch": {"vocabMap": []}})
+
+    with pytest.raises(ArtifactValidationError, match="watch.culturalNotes"):
+        validate_watch_enrichments({"watch": {"culturalNotes": {}}})
 
 
 def test_parse_gemini_json_repairs_trailing_commas():
