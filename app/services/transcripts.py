@@ -1,9 +1,12 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Literal
+from typing import Literal
 import html
-import re
-import subprocess
+
+import httpx
+
+from app.core.config import get_settings
+from app.services.youtube import extract_video_id
 
 
 @dataclass(frozen=True)
@@ -20,68 +23,6 @@ class TranscriptResult:
     segments: list[TranscriptSegment]
 
 
-CommandRunner = Callable[[list[str]], subprocess.CompletedProcess[str]]
-
-TIMESTAMP_RE = re.compile(
-    r"(?P<h>\d{2}):(?P<m>\d{2}):(?P<s>\d{2})[.,](?P<ms>\d{3})"
-)
-
-
-def run_command(args: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(args, capture_output=True, text=True, check=False)
-
-
-def timestamp_to_seconds(value: str) -> float:
-    match = TIMESTAMP_RE.search(value)
-    if match is None:
-        raise ValueError(f"Invalid timestamp: {value}")
-    return (
-        int(match.group("h")) * 3600
-        + int(match.group("m")) * 60
-        + int(match.group("s"))
-        + int(match.group("ms")) / 1000
-    )
-
-
-def clean_caption_text(value: str) -> str:
-    value = re.sub(r"<[^>]+>", "", value)
-    value = html.unescape(value)
-    return re.sub(r"\s+", " ", value).strip()
-
-
-def parse_vtt(path: Path) -> list[TranscriptSegment]:
-    segments: list[TranscriptSegment] = []
-    current_range: tuple[float, float] | None = None
-    text_lines: list[str] = []
-
-    def flush() -> None:
-        nonlocal current_range, text_lines
-        if current_range and text_lines:
-            text = clean_caption_text(" ".join(text_lines))
-            if text:
-                segments.append(TranscriptSegment(current_range[0], current_range[1], text))
-        current_range = None
-        text_lines = []
-
-    for raw_line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        line = raw_line.strip()
-        if not line:
-            flush()
-            continue
-        if "-->" in line:
-            flush()
-            start_raw, end_raw = [part.strip() for part in line.split("-->", 1)]
-            end_raw = end_raw.split(" ", 1)[0]
-            current_range = (timestamp_to_seconds(start_raw), timestamp_to_seconds(end_raw))
-            continue
-        if line == "WEBVTT" or line.startswith(("Kind:", "Language:", "NOTE")):
-            continue
-        if current_range:
-            text_lines.append(line)
-    flush()
-    return segments
-
-
 def filter_segments(
     segments: list[TranscriptSegment],
     start_sec: float,
@@ -96,48 +37,66 @@ def filter_segments(
 
 def download_youtube_captions(
     url: str,
-    output_dir: Path,
+    output_dir: Path,  # Signature compatibility
     lang: str,
     start_sec: int,
     end_sec: int,
     allow_auto: bool = True,
-    runner: CommandRunner = run_command,
+    runner: any = None,  # Signature compatibility
 ) -> TranscriptResult | None:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output_template = str(output_dir / "captions.%(ext)s")
-    args = [
-        "yt-dlp",
-        "--skip-download",
-        "--sub-lang",
-        lang,
-        "--write-sub",
-        "--sub-format",
-        "vtt",
-        "-o",
-        output_template,
-        url,
-    ]
-    if allow_auto:
-        args.insert(4, "--write-auto-sub")
-
-    result = runner(args)
-    if result.returncode != 0:
+    settings = get_settings()
+    if not settings.supadata_api_key:
         return None
 
-    vtt_files = sorted(output_dir.glob("captions*.vtt"))
-    if not vtt_files:
+    try:
+        video_id = extract_video_id(url)
+    except Exception:
         return None
 
-    all_segments = parse_vtt(vtt_files[0])
-    scoped = filter_segments(all_segments, start_sec=start_sec, end_sec=end_sec)
-    text = "\n".join(item.text for item in scoped)
-    if len(text.strip()) < 20:
+    try:
+        response = httpx.get(
+            "https://api.supadata.ai/v1/youtube/transcript",
+            params={"videoId": video_id, "lang": lang},
+            headers={"x-api-key": settings.supadata_api_key},
+            timeout=30
+        )
+        if response.status_code != 200:
+            return None
+        
+        data = response.json()
+        content = data.get("content", [])
+        
+        segments: list[TranscriptSegment] = []
+        for item in content:
+            # offset and duration are in ms
+            start = item["offset"] / 1000.0
+            duration = item["duration"] / 1000.0
+            end = start + duration
+            
+            # Filter by time range
+            if end > start_sec and start < end_sec:
+                segments.append(
+                    TranscriptSegment(
+                        start_sec=start,
+                        end_sec=end,
+                        text=html.unescape(item["text"]),
+                    )
+                )
+
+        if not segments:
+            return None
+
+        full_text = "\n".join(s.text for s in segments)
+        if len(full_text.strip()) < 20:
+            return None
+
+        # Supadata defaults to the best available transcript.
+        # We'll label it as youtube_caption for consistency.
+        return TranscriptResult(
+            source="youtube_caption",
+            text=full_text,
+            segments=segments
+        )
+
+    except Exception:
         return None
-
-    source: Literal["youtube_caption", "youtube_auto_caption"] = (
-        "youtube_caption" if ".auto." not in vtt_files[0].name else "youtube_auto_caption"
-    )
-    if allow_auto:
-        source = "youtube_auto_caption"
-
-    return TranscriptResult(source=source, text=text, segments=scoped)
