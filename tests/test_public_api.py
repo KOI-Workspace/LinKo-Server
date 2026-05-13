@@ -14,6 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from app.db.base import Base
 from app.db.session import get_db
@@ -28,8 +29,12 @@ from app.models.lesson import Lesson
 
 TEST_DATABASE_URL = "sqlite:///:memory:"
 
-engine = create_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
-TestingSessionLocal = sessionmaker(bind=engine)
+engine = create_engine(
+    TEST_DATABASE_URL,
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+)
+TestingSessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 
 def override_get_db():
@@ -42,12 +47,11 @@ def override_get_db():
 
 @pytest.fixture(autouse=True)
 def setup_db():
+    app.dependency_overrides[get_db] = override_get_db
     Base.metadata.create_all(bind=engine)
     yield
     Base.metadata.drop_all(bind=engine)
-
-
-app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides.clear()
 
 client = TestClient(app)
 
@@ -113,16 +117,18 @@ _CULTURAL_NOTES_JSON = [
     }
 ]
 
+_UNSET = object()
+
 
 def _make_lesson(
     db: Session,
     *,
     is_preview: bool = True,
     generation_status: str = "ready",
-    flashcards_json: dict | None = None,
-    subtitles_json: dict | None = None,
-    watch_vocab_json: dict | None = None,
-    cultural_notes_json: list | None = None,
+    flashcards_json: dict | None | object = _UNSET,
+    subtitles_json: dict | None | object = _UNSET,
+    watch_vocab_json: dict | None | object = _UNSET,
+    cultural_notes_json: list | None | object = _UNSET,
 ) -> Lesson:
     lesson = Lesson(
         user_id=1,
@@ -135,10 +141,10 @@ def _make_lesson(
         generation_status=generation_status,
         is_preview=is_preview,
         transcript_status="ready",
-        flashcards_json=flashcards_json or _FLASHCARDS_JSON,
-        subtitles_json=subtitles_json or _SUBTITLES_JSON,
-        watch_vocab_json=watch_vocab_json or _WATCH_VOCAB_JSON,
-        cultural_notes_json=cultural_notes_json or _CULTURAL_NOTES_JSON,
+        flashcards_json=_FLASHCARDS_JSON if flashcards_json is _UNSET else flashcards_json,
+        subtitles_json=_SUBTITLES_JSON if subtitles_json is _UNSET else subtitles_json,
+        watch_vocab_json=_WATCH_VOCAB_JSON if watch_vocab_json is _UNSET else watch_vocab_json,
+        cultural_notes_json=_CULTURAL_NOTES_JSON if cultural_notes_json is _UNSET else cultural_notes_json,
         raw_youtube_metadata={},
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
@@ -270,6 +276,15 @@ def test_get_preview_subtitles_schema():
     assert isinstance(data["lines"], list)
     assert isinstance(data["vocabMap"], dict)
     assert isinstance(data["culturalNotes"], list)
+
+
+def test_get_preview_subtitles_falls_back_to_lesson_youtube_id():
+    with TestingSessionLocal() as db:
+        lesson = _make_lesson(db, subtitles_json={"durationSec": 60, "lines": []})
+
+    data = client.get(f"{BASE}/lessons/{lesson.id}/subtitles").json()
+
+    assert data["youtubeId"] == lesson.youtube_video_id
 
 
 def test_get_preview_subtitles_lines_shape():

@@ -8,6 +8,7 @@ from sqlalchemy.pool import StaticPool
 
 import app.api.lessons as lessons_api
 from app.api.auth import get_google_user
+from app.core.config import get_settings
 from app.db.base import Base
 from app.db.session import enable_sqlite_foreign_keys, get_db
 from app.main import app
@@ -139,6 +140,44 @@ def test_ready_lesson_flashcards_and_subtitles_are_returned(client: TestClient):
     assert response.json()["youtubeId"] == "ready123"
 
 
+def test_lesson_subtitles_fall_back_to_lesson_youtube_id_when_artifact_omits_it(
+    client: TestClient,
+):
+    headers = auth_headers(client)
+    db = next(app.dependency_overrides[get_db]())
+    try:
+        user_id = db.scalar(select(User.id).where(User.email == "lessons@example.com"))
+        lesson = Lesson(
+            user_id=user_id,
+            youtube_url="https://youtu.be/fallback123",
+            youtube_video_id="fallback123",
+            title="Fallback Video Lesson",
+            channel_title="Channel",
+            thumbnail_url=None,
+            duration_seconds=60,
+            generation_status="ready",
+            transcript_status="ready",
+            transcript_source="youtube_caption",
+            transcript_text="안녕하세요.",
+            flashcards_json={"lessonId": "1", "lessonTitle": "Fallback Video Lesson", "cards": []},
+            subtitles_json={"durationSec": 60, "lines": []},
+            watch_vocab_json={},
+            cultural_notes_json=[],
+            raw_youtube_metadata={},
+        )
+        db.add(lesson)
+        db.commit()
+        db.refresh(lesson)
+        lesson_id = lesson.id
+    finally:
+        db.close()
+
+    response = client.get(f"/api/lessons/{lesson_id}/subtitles", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()["youtubeId"] == "fallback123"
+
+
 def test_lesson_artifact_endpoints_return_status_specific_errors(client: TestClient):
     headers = auth_headers(client)
     db = next(app.dependency_overrides[get_db]())
@@ -189,6 +228,8 @@ def test_lesson_artifact_endpoints_return_status_specific_errors(client: TestCli
 
 
 def test_background_task_generates_and_stores_artifacts(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("AI_PROVIDER", "mock")
+    get_settings.cache_clear()
     headers = auth_headers(client)
     db = next(app.dependency_overrides[get_db]())
     try:
@@ -212,12 +253,24 @@ def test_background_task_generates_and_stores_artifacts(client: TestClient, monk
     finally:
         db.close()
 
-    monkeypatch.setattr(
-        lessons_api,
-        "download_youtube_captions",
-        lambda *args, **kwargs: TranscriptResult(
+    def fake_download(*args, **kwargs):
+        if kwargs["lang"] == "en":
+            return TranscriptResult(
+                source="youtube_caption",
+                text="Hello. Today we study Korean.",
+                lang="en",
+                segments=[
+                    TranscriptSegment(
+                        start_sec=0,
+                        end_sec=5,
+                        text="Hello. Today we study Korean.",
+                    )
+                ],
+            )
+        return TranscriptResult(
             source="youtube_caption",
             text="안녕하세요. 오늘은 한국어를 공부해요.",
+            lang="ko",
             segments=[
                 TranscriptSegment(
                     start_sec=0,
@@ -225,8 +278,9 @@ def test_background_task_generates_and_stores_artifacts(client: TestClient, monk
                     text="안녕하세요. 오늘은 한국어를 공부해요.",
                 )
             ],
-        ),
-    )
+        )
+
+    monkeypatch.setattr(lessons_api, "download_youtube_captions", fake_download)
 
     lessons_api.generate_lesson_artifacts_task(lesson_id)
 
@@ -237,3 +291,82 @@ def test_background_task_generates_and_stores_artifacts(client: TestClient, monk
     response = client.get(f"/api/lessons/{lesson_id}/subtitles", headers=headers)
     assert response.status_code == 200
     assert response.json()["youtubeId"] == "abc123XYZ00"
+    assert response.json()["lines"][0]["english"] == "Hello. Today we study Korean."
+    assert "안녕하세요" in response.json()["vocabMap"]
+    assert response.json()["culturalNotes"][0]["subtitleId"] == "s1"
+    get_settings.cache_clear()
+
+
+def test_background_task_keeps_watch_ready_when_flashcard_generation_fails(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    headers = auth_headers(client)
+    db = next(app.dependency_overrides[get_db]())
+    try:
+        user_id = db.scalar(select(User.id).where(User.email == "lessons@example.com"))
+        lesson = Lesson(
+            user_id=user_id,
+            youtube_url="https://youtu.be/abc123XYZ00",
+            youtube_video_id="abc123XYZ00",
+            title="Subtitle Only Lesson",
+            channel_title="Channel",
+            thumbnail_url=None,
+            duration_seconds=900,
+            generation_status="generating",
+            transcript_status="pending",
+            raw_youtube_metadata={},
+        )
+        db.add(lesson)
+        db.commit()
+        db.refresh(lesson)
+        lesson_id = lesson.id
+    finally:
+        db.close()
+
+    requested_ranges: list[tuple[int, int]] = []
+
+    def fake_download(*args, **kwargs):
+        requested_ranges.append((kwargs["start_sec"], kwargs["end_sec"]))
+        if kwargs["lang"] == "en":
+            return None
+        return TranscriptResult(
+            source="youtube_caption",
+            text="안녕하세요. 오늘은 한국어를 공부해요.",
+            segments=[
+                TranscriptSegment(
+                    start_sec=0,
+                    end_sec=5,
+                    text="안녕하세요. 오늘은 한국어를 공부해요.",
+                )
+            ],
+        )
+
+    monkeypatch.setattr(lessons_api, "download_youtube_captions", fake_download)
+    monkeypatch.setattr(
+        lessons_api,
+        "generate_lesson_artifacts_from_transcript",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("Gemini unavailable")),
+    )
+
+    lessons_api.generate_lesson_artifacts_task(lesson_id)
+
+    assert requested_ranges == [(0, 900), (0, 900)]
+
+    response = client.get(f"/api/lessons/{lesson_id}", headers=headers)
+    assert response.status_code == 200
+    assert response.json()["generationStatus"] == "ready"
+    assert response.json()["subtitleDone"] is True
+    assert response.json()["flashcardDone"] is False
+    assert response.json()["errorCode"] == "flashcard_generation_failed"
+
+    response = client.get(f"/api/lessons/{lesson_id}/subtitles", headers=headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["youtubeId"] == "abc123XYZ00"
+    assert body["lines"][0]["korean"].startswith("안녕하세요")
+    assert body["lines"][0]["english"] == ""
+
+    response = client.get(f"/api/lessons/{lesson_id}/flashcards", headers=headers)
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "flashcard_generation_failed"

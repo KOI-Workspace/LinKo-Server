@@ -107,6 +107,14 @@ def get_preview_flashcards(
     """Return flashcard data for a preview lesson without authentication."""
     lesson = _get_ready_preview_lesson(db, lesson_id)
     if lesson.flashcards_json is None:
+        if lesson.error_code == "flashcard_generation_failed":
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "flashcard_generation_failed",
+                    "message": lesson.error_message or "Flashcard generation failed.",
+                },
+            )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
@@ -139,6 +147,7 @@ def get_preview_subtitles(
         )
     return {
         **lesson.subtitles_json,
+        "youtubeId": lesson.subtitles_json.get("youtubeId") or lesson.youtube_video_id,
         "vocabMap": lesson.watch_vocab_json or {},
         "culturalNotes": lesson.cultural_notes_json or [],
     }

@@ -38,6 +38,14 @@ def get_flashcards_for_lesson(
                 )
             if lesson.flashcards_json is not None:
                 return lesson.flashcards_json
+            if lesson.error_code == "flashcard_generation_failed":
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "flashcard_generation_failed",
+                        "message": lesson.error_message or "Flashcard generation failed.",
+                    },
+                )
 
     flashcards = get_lesson_flashcards(lesson_id)
     if flashcards is None:

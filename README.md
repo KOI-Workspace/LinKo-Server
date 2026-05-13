@@ -66,3 +66,22 @@ Stop local services:
 ```sh
 docker compose down
 ```
+
+## EC2 Deployment
+
+The production deployment uses GitHub Actions to copy the app to an EC2 instance
+and restart Docker Compose there. Configure these GitHub environment secrets for
+the `production` environment:
+
+- `EC2_HOST`: EC2 public host or IP address.
+- `EC2_USER`: SSH user, for example `ubuntu`.
+- `EC2_SSH_KEY`: private key with SSH access to the instance.
+- `EC2_PORT`: optional SSH port, defaults to `22`.
+- `EC2_DEPLOY_PATH`: optional deploy directory, defaults to `/opt/linko-server`.
+- `PROD_ENV`: full contents of the production `.env` file. Use `.env.example` as
+  the template, and replace secrets before deploying.
+
+On the EC2 instance, install Docker and the Docker Compose plugin first. Then run
+the `Deploy to EC2` workflow manually, or merge to `main` to deploy
+automatically. The workflow builds the FastAPI image on EC2, starts the API and
+PostgreSQL containers, and runs Alembic migrations.
