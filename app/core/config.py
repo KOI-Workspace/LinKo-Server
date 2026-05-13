@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-2.5-flash"
     supadata_api_key: str = ""
     discord_waitlist_webhook_url: str = ""
+    discord_new_user_webhook_url: str = ""
     cors_origins: str = (
         "http://localhost:3000,"
         "http://127.0.0.1:3000,"
