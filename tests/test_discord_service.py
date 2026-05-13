@@ -1,7 +1,8 @@
 from datetime import UTC, datetime
 
+from app.models.user import User
 from app.models.waitlist import WaitlistEntry
-from app.services.discord import build_waitlist_signup_payload
+from app.services.discord import build_new_user_signup_payload, build_waitlist_signup_payload
 
 
 def test_build_waitlist_signup_payload_includes_user_and_video_context():
@@ -53,3 +54,25 @@ def test_build_waitlist_signup_payload_omits_images_when_not_available():
     embed = payload["embeds"][0]
     assert "thumbnail" not in embed
     assert "image" not in embed
+
+
+def test_build_new_user_signup_payload_includes_basic_profile_details():
+    user = User(
+        id=7,
+        google_sub="google-123",
+        email="person@example.com",
+        name="Person",
+        picture="https://example.com/pic.png",
+    )
+
+    payload = build_new_user_signup_payload(user)
+
+    assert payload["content"] is None
+    embed = payload["embeds"][0]
+    assert embed["title"] == "Person signed in with Google"
+    assert embed["description"] == "New user account created"
+    assert embed["thumbnail"] == {"url": "https://example.com/pic.png"}
+    assert embed["fields"] == [
+        {"name": "Name", "value": "Person", "inline": True},
+        {"name": "Email", "value": "person@example.com", "inline": True},
+    ]

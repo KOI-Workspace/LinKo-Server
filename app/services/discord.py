@@ -4,6 +4,7 @@ from datetime import UTC
 
 import httpx
 
+from app.models.user import User
 from app.models.waitlist import WaitlistEntry
 from app.services.youtube import extract_video_id
 
@@ -48,6 +49,32 @@ def notify_waitlist_signup(entry: WaitlistEntry, webhook_url: str) -> None:
     response = httpx.post(
         webhook_url,
         json=build_waitlist_signup_payload(entry),
+        timeout=5.0,
+    )
+    response.raise_for_status()
+
+
+def build_new_user_signup_payload(user: User) -> dict:
+    embed = {
+        "title": f"{user.name} signed in with Google",
+        "description": "New user account created",
+        "color": 0x34A853,
+        "fields": [
+            {"name": "Name", "value": user.name, "inline": True},
+            {"name": "Email", "value": user.email, "inline": True},
+        ],
+    }
+
+    if user.picture:
+        embed["thumbnail"] = {"url": user.picture}
+
+    return {"content": None, "embeds": [embed]}
+
+
+def notify_new_user_signup(user: User, webhook_url: str) -> None:
+    response = httpx.post(
+        webhook_url,
+        json=build_new_user_signup_payload(user),
         timeout=5.0,
     )
     response.raise_for_status()
