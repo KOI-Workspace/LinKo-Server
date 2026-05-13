@@ -36,6 +36,17 @@ def filter_segments(
     ]
 
 
+def language_matches(requested_lang: str, actual_lang: str | None) -> bool:
+    if not actual_lang:
+        return False
+
+    return _base_language_code(requested_lang) == _base_language_code(actual_lang)
+
+
+def _base_language_code(lang: str) -> str:
+    return lang.strip().lower().replace("_", "-").split("-", maxsplit=1)[0]
+
+
 def download_youtube_captions(
     url: str,
     output_dir: Path,  # Signature compatibility
@@ -67,7 +78,7 @@ def download_youtube_captions(
         
         data = response.json()
         actual_lang = data.get("lang")
-        if require_requested_lang and actual_lang != lang:
+        if require_requested_lang and not language_matches(lang, actual_lang):
             return None
 
         content = data.get("content", [])

@@ -55,6 +55,46 @@ def test_download_youtube_captions_success(mock_get_settings, mock_get, tmp_path
 
 @patch("app.services.transcripts.httpx.get")
 @patch("app.services.transcripts.get_settings")
+def test_download_youtube_captions_accepts_regional_language_variant(
+    mock_get_settings,
+    mock_get,
+    tmp_path: Path,
+):
+    mock_settings = MagicMock()
+    mock_settings.supadata_api_key = "test-key"
+    mock_get_settings.return_value = mock_settings
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "content": [
+            {
+                "text": "안녕하세요. 오늘은 한국어 자막을 공부합니다.",
+                "offset": 0,
+                "duration": 5000,
+                "lang": "ko-KR",
+            },
+        ],
+        "lang": "ko-KR",
+    }
+    mock_get.return_value = mock_response
+
+    transcript = download_youtube_captions(
+        "https://youtu.be/abc123XYZ00",
+        tmp_path,
+        lang="ko",
+        start_sec=0,
+        end_sec=10,
+        allow_auto=True,
+    )
+
+    assert transcript is not None
+    assert transcript.lang == "ko-KR"
+    assert "한국어 자막" in transcript.text
+
+
+@patch("app.services.transcripts.httpx.get")
+@patch("app.services.transcripts.get_settings")
 def test_download_youtube_captions_rejects_supadata_language_fallback(
     mock_get_settings,
     mock_get,
