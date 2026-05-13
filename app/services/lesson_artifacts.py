@@ -149,6 +149,7 @@ def limit_transcript_for_flashcards(
         source=transcript.source,
         text="\n".join(segment.text for segment in segments),
         segments=segments,
+        lang=transcript.lang,
     )
 
 
@@ -209,6 +210,13 @@ def sample_transcript_for_flashcards(
 
         if used_chars >= max_chars:
             break
+
+    if not selected:
+        return limit_transcript_for_flashcards(
+            transcript,
+            max_seconds=max_seconds,
+            max_chars=max_chars,
+        )
 
     selected.sort(key=lambda segment: (segment.start_sec, segment.end_sec))
     return TranscriptResult(

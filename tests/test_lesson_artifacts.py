@@ -125,6 +125,26 @@ def test_flashcard_transcript_sampling_is_deterministic_and_not_always_the_start
     assert covered_seconds <= 180
 
 
+def test_flashcard_transcript_sampling_falls_back_when_windows_are_empty():
+    transcript = TranscriptResult(
+        source="youtube_caption",
+        text="",
+        segments=[
+            TranscriptSegment(start_sec=0, end_sec=10, text="첫 실제 발화"),
+            TranscriptSegment(start_sec=1000, end_sec=1010, text="마지막 실제 발화"),
+        ],
+        lang="ko",
+    )
+
+    sampled = sample_transcript_for_flashcards(transcript, seed="lesson:abc")
+
+    assert sampled.segments == [
+        TranscriptSegment(start_sec=0, end_sec=10, text="첫 실제 발화")
+    ]
+    assert sampled.text == "첫 실제 발화"
+    assert sampled.lang == "ko"
+
+
 def test_validate_lesson_artifacts_rejects_missing_required_shapes():
     with pytest.raises(ArtifactValidationError, match="flashcards.cards"):
         validate_lesson_artifacts(
