@@ -19,6 +19,7 @@ python3 -m pip install -e ".[dev]"
 ```
 
 Create `.env` from `.env.example`, then fill `JWT_SECRET_KEY`, `GOOGLE_CLIENT_ID`, and `YOUTUBE_API_KEY`.
+Set `DISCORD_WAITLIST_WEBHOOK_URL` too if you want waitlist signups to post to Discord.
 
 Run database migrations:
 
